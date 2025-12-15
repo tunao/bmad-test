@@ -9,6 +9,7 @@ This script serves as the main entry point for running the hello world package w
 ## Behavior
 
 - Resolves the script's parent directory and adds `src/` to `sys.path`
+- Performs a simple arithmetic calculation (1 + 2) and prints the result
 - Uses `runpy.run_module()` to execute the `helloworld` package as `__main__`
 - Preserves command-line arguments and exit codes from the target module
 
