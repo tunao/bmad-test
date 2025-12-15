@@ -1,1 +1,4 @@
 # No runtime requirements for this minimal example
+boto3
+pyyaml
+anthropic
