@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export AWS_PROFILE="aws-sso-access-datona-dev"
+export AWS_REGION="eu-west-1"
+
+# Safety valve – skip when needed
+if [ "${SKIP_DOC_BOT:-0}" = "1" ]; then
+  echo "[bmad-doc] SKIP_DOC_BOT=1 set, skipping."
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Collect staged files (repo-relative)
+code_files="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(py|ts|js|go|java|cs)$' || true)"
+
+if [ -z "$code_files" ]; then
+  echo "[bmad-doc] No relevant code files changed, skipping."
+  exit 0
+fi
+
+echo "[bmad-doc] Generating docs for:"
+printf '%s\n' "$code_files"
+
+# Ensure claude CLI exists
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[bmad-doc] ERROR: 'claude' CLI not found in PATH."
+  exit 1
+fi
+
+# Loop line-by-line (safe)
+printf '%s\n' "$code_files" | while IFS= read -r f; do
+  [ -z "$f" ] && continue
+
+  echo "[bmad-doc] Documenting $f"
+
+  # map src/foo/bar.py -> docs/src/foo/bar.md
+  md_path="docs/${f%.*}.md"
+  mkdir -p "$(dirname "$md_path")"
+
+  # Build prompt and pipe directly to claude (no bash variables holding code/diff/doc)
+  {
+    echo "You are the Repo Docs Documenter BMAD agent."
+    echo
+    echo "Act as the *doc-file* command: given a source file, its staged diff,"
+    echo "and optional existing Markdown doc, output the FINAL Markdown doc content."
+    echo
+    echo "Input metadata:"
+    echo "- repo-relative path: $f"
+    echo
+    echo "Staged file contents:"
+    printf '%s\n' '```'
+    git show ":$f" 2>/dev/null || true
+    printf '%s\n' '```'
+    echo
+    echo "Staged git diff:"
+    printf '%s\n' '```diff'
+    git diff --cached -- "$f" 2>/dev/null || true
+    printf '%s\n' '```'
+    echo
+    echo "Existing Markdown doc (may be empty):"
+    printf '%s\n' '```markdown'
+    [ -f "$md_path" ] && cat "$md_path" || true
+    printf '%s\n' '```'
+    echo
+    echo "Task:"
+    echo "- If existing doc is non-empty: update it in place to reflect the current code and diff."
+    echo "- If empty: create a new doc explaining the file's role, public API, invariants, and examples."
+    echo "- Return ONLY the final Markdown. No commentary, no backticks."
+  } | claude \
+      -p \
+      --agent repo-docs-documenter \
+      --output-format text \
+      --max-turns 3 \
+      --dangerously-skip-permissions \
+      > "$md_path"
+
+  git add "$md_path"
+done
+
+echo "[bmad-doc] Docs updated and staged."
