@@ -23,6 +23,6 @@ def calculate_example_sum() -> int:
 
 if __name__ == "__main__":
     result = calculate_example_sum()
-    print(f"1 + 2 = {result}")
+    print(f"1 + 3 = {result}")
 
     runpy.run_module("helloworld", run_name="__main__")
