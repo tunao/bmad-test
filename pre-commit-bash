@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export AWS_PROFILE="aws-sso-access-datona-dev"
+export AWS_REGION="eu-west-1"
+
+if [ "${SKIP_DOC_BOT:-0}" = "1" ]; then
+  echo "[bmad-doc] SKIP_DOC_BOT=1 set, skipping."
+  exit 0
+fi
+
+changed_files=$(git diff --cached --name-only --diff-filter=ACM || true)
+if [ -z "$changed_files" ]; then
+  echo "[bmad-doc] No staged files, skipping."
+  exit 0
+fi
+
+code_files=$(echo "$changed_files" | grep -E '\.(py|ts|js|go|java|cs)$' || true)
+if [ -z "$code_files" ]; then
+  echo "[bmad-doc] No relevant code files changed, skipping."
+  exit 0
+fi
+
+for f in $code_files; do
+  echo "[bmad-doc] Documenting $f"
+
+  code=$(git show ":$f")                          # staged contents
+  diff=$(git diff --cached -- "$f")               # staged diff
+
+  # map src/foo/bar.py -> docs/src/foo/bar.md
+  md_path="docs/${f%.*}.md"
+  mkdir -p "$(dirname "$md_path")"
+  existing_md=""
+  if [ -f "$md_path" ]; then
+    existing_md="$(cat "$md_path")"
+  fi
+
+  # Build a compact prompt for the BMAD agent
+  prompt=$(
+    cat <<EOF
+You are the Repo Docs Documenter BMAD agent.
+
+Act as the *doc-file* command: given a source file, its staged diff,
+and optional existing Markdown doc, output the FINAL Markdown doc content.
+
+Input metadata:
+- repo-relative path: $f
+
+Staged file contents:
+\`\`\`
+$code
+\`\`\`
+
+Staged git diff:
+\`\`\`diff
+$diff
+\`\`\`
+
+Existing Markdown doc (may be empty):
+\`\`\`markdown
+$existing_md
+\`\`\`
+
+Task:
+- If existing doc is non-empty: update it in place to reflect the current code and diff.
+- If empty: create a new doc explaining the file's role, public API, invariants, and examples.
+- Return ONLY the final Markdown. No commentary, no backticks.
+EOF
+  )
+
+  # Call Claude Code with your BMAD agent
+  md_content=$(printf "%s" "$prompt" | claude \
+    -p \
+    --agent repo-docs-documenter \
+    --output-format text \
+    --max-turns 3 \
+    --dangerously-skip-permissions \
+    --tools "" \
+  )
+
+  printf "%s" "$md_content" > "$md_path"
+  git add "$md_path"
+done
+
+echo "[bmad-doc] Docs updated and staged."

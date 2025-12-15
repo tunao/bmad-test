@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Use your existing AWS SSO profile for Claude via Bedrock
+export AWS_PROFILE="aws-sso-access-datona-dev"
+export AWS_REGION="eu-west-1"
+
+# Safety valve – skip when needed
+if [ "${SKIP_DOC_BOT:-0}" = "1" ]; then
+  echo "[bmad-doc] SKIP_DOC_BOT=1 set, skipping."
+  exit 0
+fi
+
+changed_files=$(git diff --cached --name-only --diff-filter=ACM || true)
+
+if [ -z "$changed_files" ]; then
+  echo "[bmad-doc] No staged files, skipping doc generation."
+  exit 0
+fi
+
+# Restrict to languages you care about
+code_files=$(echo "$changed_files" | grep -E '\.(py|ts|js|go|java|cs)$' || true)
+
+if [ -z "$code_files" ]; then
+  echo "[bmad-doc] No relevant code files changed, skipping."
+  exit 0
+fi
+
+echo "[bmad-doc] Generating docs for:"
+echo "$code_files"
+
+# Call the BMAD-aware doc generator
+python .git-hooks/generate_docs_bmad.py $code_files
+
+# Stage generated docs
+git add docs/ **/*.md 2>/dev/null || true
+
+echo "[bmad-doc] Docs updated and staged."
