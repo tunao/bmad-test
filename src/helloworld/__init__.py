@@ -7,5 +7,5 @@ __all__ = ["main"]
 
 def main():
     """Print greeting to stdout."""
-    print("Hello, world2!")
+    print("Hello, world3!")
 
